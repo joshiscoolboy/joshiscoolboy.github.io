@@ -1,53 +1,88 @@
-{
-  "name": "nebula",
-  "private": true,
-  "type": "module",
-  "scripts": {
-    "dev": "concurrently \"vite\" \"bare-server-node --port 8080\"",
-    "build": "vite build",
-    "bstart": "npm run build && tsx server.ts",
-    "start": "tsx server.ts",
-    "preview": "vite preview",
-    "format": "prettier --write ."
-  },
-  "dependencies": {
-    "@fastify/compress": "^6.5.0",
-    "@fastify/cookie": "^9.3.1",
-    "@fastify/static": "^6.12.0",
-    "@nebula-services/bare-server-node": "2.0.1-patch.1",
-    "@nebula-services/dynamic": "0.7.2-patch.2",
-    "@nebula-services/ultraviolet": "1.0.1-1.patch.7",
-    "classnames": "^2.3.2",
-    "crypto-js": "^4.2.0",
-    "fastify": "^4.25.1",
-    "framer-motion": "^10.16.16",
-    "i18next": "^23.7.9",
-    "i18next-browser-languagedetector": "^7.2.0",
-    "localforage": "^1.10.0",
-    "million": "^2.6.4",
-    "preact": "^10.13.1",
-    "preact-iso": "^2.3.2",
-    "preact-render-to-string": "^6.3.1",
-    "preact-router": "^4.1.2",
-    "rammerhead": "https://github.com/holy-unblocker/rammerhead/releases/download/v1.2.41-holy.5/rammerhead-1.2.41-holy.5.tgz",
-    "react-helmet": "^6.1.0",
-    "react-i18next": "^13.5.0",
-    "react-icons": "^4.12.0",
-    "react-toastify": "^9.1.3",
-    "tsx": "^4.7.0"
-  },
-  "devDependencies": {
-    "@preact/preset-vite": "^2.5.0",
-    "autoprefixer": "^10.4.16",
-    "concurrently": "^8.2.2",
-    "eslint": "^8.55.0",
-    "eslint-config-preact": "^1.3.0",
-    "postcss": "^8.4.32",
-    "prettier": "^3.1.1",
-    "prettier-plugin-tailwindcss": "^0.5.9",
-    "tailwindcss": "^3.3.6",
-    "typescript": "^5.3.3",
-    "vite": "^5.0.9",
-    "vite-plugin-static-copy": "^1.0.0"
+import express from 'express'
+import basicAuth from 'express-basic-auth'
+import http from 'node:http'
+import { createBareServer } from '@tomphttp/bare-server-node'
+import path from 'node:path'
+import cors from 'cors'
+import config from './config.js'
+const __dirname = process.cwd()
+const server = http.createServer()
+const app = express(server)
+const bareServer = createBareServer('/v/')
+const PORT = 8000
+if (config.challenge) {
+  console.log('Password protection is enabled. Usernames are: ' + Object.keys(config.users))
+  console.log('Passwords are: ' + Object.values(config.users))
+  app.use(basicAuth(config))
+}
+app.use(express.json())
+app.use(express.urlencoded({ extended: true }))
+app.use(cors())
+app.use(express.static(path.join(__dirname, 'static')))
+
+const routes = [
+  { path: '/', file: 'index.html' },
+  { path: '/~', file: 'apps.html' },
+  { path: '/-', file: 'games.html' },
+  { path: '/!', file: 'settings.html' },
+  { path: '/0', file: 'tabs.html' },
+  { path: '/&', file: 'go.html' },
+  { path: '/e', file: 'now.html' },
+]
+
+const fetchData = async (req, res, next, baseUrl) => {
+  try {
+    const reqTarget = `${baseUrl}/${req.params[0]}`
+    const asset = await fetch(reqTarget)
+
+    if (asset.ok) {
+      const data = await asset.arrayBuffer()
+      res.end(Buffer.from(data))
+    } else {
+      next()
+    }
+  } catch (error) {
+    console.error('Error fetching:', error)
+    next(error)
   }
 }
+
+app.get('/y/*', cors({ origin: false }), (req, res, next) => {
+  const baseUrl = 'https://raw.githubusercontent.com/ypxa/y/main'
+  fetchData(req, res, next, baseUrl)
+})
+
+app.get('/f/*', cors({ origin: false }), (req, res, next) => {
+  const baseUrl = 'https://raw.githubusercontent.com/4x-a/x/fixy'
+  fetchData(req, res, next, baseUrl)
+})
+
+routes.forEach((route) => {
+  app.get(route.path, (req, res) => {
+    res.sendFile(path.join(__dirname, 'static', route.file))
+  })
+})
+
+server.on('request', (req, res) => {
+  if (bareServer.shouldRoute(req)) {
+    bareServer.routeRequest(req, res)
+  } else {
+    app(req, res)
+  }
+})
+
+server.on('upgrade', (req, socket, head) => {
+  if (bareServer.shouldRoute(req)) {
+    bareServer.routeUpgrade(req, socket, head)
+  } else {
+    socket.end()
+  }
+})
+
+server.on('listening', () => {
+  console.log(`Running at http://localhost:${PORT}`)
+})
+
+server.listen({
+  port: PORT,
+})
